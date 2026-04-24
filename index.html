@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>TRADINGBEIS</title>
+<title>TRADINGBEIS v10.25</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 // ─── SUPABASE CONFIG ───────────────────────────────────────────
@@ -480,12 +480,14 @@ function mostrarFormularioResetPassword() {
 }
 
 // Listener principal al cargar el DOM
+// v10.25: centralizamos todo el manejo de sesión en onAuthStateChange para evitar
+// condiciones de carrera (F5 lento, pantalla negra al cerrar sesión, doble click para entrar).
 window.addEventListener('DOMContentLoaded', function() {
   console.log('[TB] DOMContentLoaded — verificando tipo de carga');
   var tipoLink = detectarTipoLink();
   console.log('[TB] tipoLink detectado:', tipoLink);
 
-  // Si viene del link de recuperación de contraseña → mostrar form de reset
+  // Si viene del link de recuperación de contraseña o invitación → mostrar form de reset
   if (tipoLink === 'recovery' || tipoLink === 'invite') {
     setTimeout(function() { mostrarFormularioResetPassword(); }, 500);
     return;
@@ -497,21 +499,46 @@ window.addEventListener('DOMContentLoaded', function() {
     return;
   }
 
-  // Flujo normal: verificar si hay sesión activa (sin delay para evitar parpadeo de portada)
+  // Registrar listener ANTES de getSession para capturar eventos posteriores también.
+  sbClient.auth.onAuthStateChange(function(event, session) {
+    console.log('[TB] onAuthStateChange:', event, session && session.user && session.user.email);
+    if (_recoveryMode) return; // estamos en flujo de reset, no interferir
+    if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') {
+      if (session && session.user && !_autoLoginDone) {
+        doAutoLogin(session.user);
+      }
+    } else if (event === 'SIGNED_OUT') {
+      // Si el logout no fue iniciado por nuestro propio flujo (que recarga la página),
+      // aseguramos mostrar portada y ocultar app.
+      if (!window._tbLogoutInProgress) {
+        try {
+          var app=ge('app'); if(app) app.classList.remove('open');
+          var login=ge('login-screen'); if(login){login.classList.remove('show');login.style.display='none';}
+          var port=document.getElementById('portada-section'); if(port){port.classList.add('show');port.style.display='block';}
+        } catch(e){}
+        _autoLoginDone = false;
+      }
+    }
+  });
+
+  // Comprobar sesión actual. Si existe, onAuthStateChange con INITIAL_SESSION ya disparará doAutoLogin.
+  // Si no hay sesión, mostramos portada.
   setTimeout(async function() {
     if (_autoLoginDone || _recoveryMode) return;
     try {
       console.log('[TB] Verificando sesión con getSession()...');
       const { data, error } = await sbClient.auth.getSession();
       if (error) console.warn('[TB] getSession devolvió error:', error);
-      if (data && data.session && data.session.user) {
-        console.log('[TB] Sesión encontrada para:', data.session.user.email);
-        await doAutoLogin(data.session.user);
-      } else {
-        console.log('[TB] No hay sesión activa, mostrando portada/login');
+      if (!(data && data.session && data.session.user)) {
+        console.log('[TB] No hay sesión activa, mostrando portada');
+        var port=document.getElementById('portada-section');
+        if(port){port.classList.add('show');port.style.display='block';}
       }
+      // Si HAY sesión, no hacemos nada: onAuthStateChange se encargará con INITIAL_SESSION.
     } catch(e) {
       console.warn('[TB] Error verificando sesión:', e);
+      var port=document.getElementById('portada-section');
+      if(port){port.classList.add('show');port.style.display='block';}
     }
   }, 0);
 });
@@ -531,7 +558,8 @@ window.addEventListener('DOMContentLoaded', function() {
 html,body{height:100%;}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--bg);color:var(--white);}
 ::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px;}
-#login-screen{position:fixed;inset:0;background:var(--bg);display:flex;align-items:flex-start;justify-content:center;z-index:9999;overflow-y:auto;padding:30px 20px;}
+#login-screen{position:fixed;inset:0;background:var(--bg);display:none;align-items:flex-start;justify-content:center;z-index:9999;overflow-y:auto;padding:30px 20px;}
+#login-screen.show{display:flex;}
 .lbox{width:400px;max-width:100%;background:var(--bg1);border:1px solid var(--border2);border-radius:12px;padding:30px 40px;box-shadow:0 40px 80px rgba(0,0,0,.6);margin:auto;}
 .l-logo-wrap{text-align:center;margin-bottom:22px;}
 .l-logo-img{width:78px;height:78px;border-radius:50%;border:2px solid var(--border2);object-fit:cover;display:block;margin:0 auto 10px;}
@@ -1091,16 +1119,367 @@ body.light-mode .faq-panel .faq-q{color:#1a1a2e;}
 body.light-mode .faq-panel .faq-a{color:#555;}
 body.light-mode .faq-close-btn{background:#fff;border-color:#dde;color:#555;}
 
-#portada-section{position:fixed;inset:0;background:#0a0c14;z-index:10000;overflow-y:auto;}
+#portada-section{position:fixed;inset:0;background:#0a0c14;z-index:10000;overflow-y:auto;display:none;}
+#portada-section.show{display:block;}
 /* ===== END PORTADA ===== */
+
+/* ═══════════════════════════════════════════════════════════
+   RESPONSIVE MOBILE (v10.22) - Se activa ≤ 900px
+   ═══════════════════════════════════════════════════════════ */
+@media (max-width: 900px) {
+  /* ===== APP CONTENEDOR ===== */
+  #app.open { flex-direction: column; height: 100vh; }
+  html, body { height: 100%; overflow-x: hidden; }
+
+  /* ===== OCULTAR SIDEBAR DESKTOP ===== */
+  .sidebar { display: none !important; }
+
+  /* ===== MAIN OCUPA TODO ===== */
+  .main { width: 100%; height: 100vh; }
+
+  /* ===== TOPBAR COMPACTA ===== */
+  .topbar { height: 52px; min-height: 52px; padding: 0 12px; }
+  .tb-page { font-size: 14px; }
+  .tb-acc { display: none; }
+  .tb-date-wrap { display: none; }
+  .tb-live { padding: 3px 8px; font-size: 9px; }
+  .tb-user-wrap { padding: 3px 7px; }
+  .tb-username { display: none; }
+  .tb-role { display: none; }
+  .tb-divider { display: none; }
+
+  /* ===== CONTENT: DEJA ESPACIO PARA BARRA INFERIOR ===== */
+  .content { padding-bottom: 68px; }
+  .page { padding: 12px 10px; padding-bottom: 72px; }
+
+  /* ===== BARRA INFERIOR MOBILE ===== */
+  .mobile-nav { 
+    display: flex !important; 
+    position: fixed; 
+    bottom: 0; left: 0; right: 0; 
+    height: 60px; 
+    background: var(--bg1); 
+    border-top: 1px solid var(--border2); 
+    z-index: 500;
+    box-shadow: 0 -2px 10px rgba(0,0,0,.4);
+  }
+  .mobile-nav-item { 
+    flex: 1; display: flex; flex-direction: column; 
+    align-items: center; justify-content: center; 
+    gap: 3px; cursor: pointer; 
+    color: var(--w3); font-size: 9px; font-weight: 600;
+    transition: all .15s;
+    padding: 4px 0;
+  }
+  .mobile-nav-item .mn-ico { font-size: 20px; line-height: 1; }
+  .mobile-nav-item.on { color: var(--gold); }
+  .mobile-nav-item:active { background: var(--bg2); }
+
+  /* ===== MENÚ "MÁS" (modal bottom sheet) ===== */
+  .mobile-more-sheet {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    background: var(--bg1); border-top: 2px solid var(--gold);
+    border-radius: 16px 16px 0 0;
+    z-index: 600; padding: 16px 12px 80px;
+    max-height: 70vh; overflow-y: auto;
+    transform: translateY(100%); transition: transform .25s ease-out;
+    box-shadow: 0 -10px 30px rgba(0,0,0,.6);
+  }
+  .mobile-more-sheet.on { transform: translateY(0); }
+  .mobile-more-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 550;
+    display: none;
+  }
+  .mobile-more-backdrop.on { display: block; }
+  .mobile-more-title { font-size: 12px; font-weight: 800; color: var(--gold); text-align: center; margin-bottom: 12px; letter-spacing: .08em; text-transform: uppercase; }
+  .mobile-more-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .mobile-more-item {
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    padding: 14px 6px; background: var(--bg2); border: 1px solid var(--border2);
+    border-radius: 10px; color: var(--w2); font-size: 10px; font-weight: 600;
+    text-align: center; cursor: pointer;
+  }
+  .mobile-more-item:active { background: var(--bg3); border-color: var(--gold); }
+  .mobile-more-item .mmi-ico { font-size: 22px; }
+
+  /* ===== HEADER PÁGINAS ===== */
+  .ph { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .ph h2 { font-size: 18px; }
+  .ph-sub { font-size: 10px; }
+  .ph-actions { width: 100%; flex-wrap: wrap; }
+
+  /* ===== GRIDS: 6/4 columnas → 2 columnas ===== */
+  .g6 { grid-template-columns: repeat(2, 1fr); gap: 6px; }
+  .g4 { grid-template-columns: repeat(2, 1fr); gap: 6px; }
+  .g3 { grid-template-columns: 1fr; gap: 6px; }
+  .g2 { grid-template-columns: 1fr; gap: 6px; }
+  .fg4 { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+
+  /* ===== TARJETAS STAT ===== */
+  .sc { padding: 8px 9px; }
+  .sc-lbl { font-size: 8px; }
+  .sc-val { font-size: 14px; }
+  .sc-sub { font-size: 8px; }
+
+  /* ===== RETIROS HEADER ===== */
+  .ret-header { grid-template-columns: repeat(2, 1fr); gap: 6px; }
+  .ret-hcard { padding: 10px 8px; }
+  .ret-hlbl { font-size: 8px; }
+  .ret-hval { font-size: 15px; }
+  .ret-hsub { font-size: 8px; }
+
+  /* ===== PANELES ===== */
+  .panel { padding: 0; }
+  .pan-hd { padding: 10px 12px; }
+  .pan-t { font-size: 11px; }
+  .pan-bd { padding: 10px; }
+
+  /* ===== FORMULARIOS INPUTS GRANDES ===== */
+  .fi { font-size: 14px !important; padding: 10px 12px !important; min-height: 42px; }
+  .fsel { font-size: 14px !important; padding: 10px 12px !important; min-height: 42px; }
+  .flbl { font-size: 11px; }
+  .fgrp { margin-bottom: 10px; }
+
+  /* ===== BOTONES MÁS GRANDES (dedos) ===== */
+  .btn, .btn-g, .btn-o, .btn-r { padding: 10px 14px !important; font-size: 12px !important; min-height: 40px; }
+  .btn-sm { padding: 7px 10px !important; font-size: 10px !important; min-height: 32px; }
+
+  /* ===== TABLAS → SCROLL HORIZONTAL POR DEFECTO ===== */
+  .panel .tbl { font-size: 10px; }
+  .panel .tbl th, .panel .tbl td { padding: 6px 5px; }
+
+  /* ===== OPERACIONES: CONVERTIR TABLA EN CARDS ===== */
+  #ops-table-wrapper { display: block; }
+  #ops-table { display: none !important; }
+  #ops-cards { display: block !important; }
+  .op-card {
+    background: var(--bg2); border: 1px solid var(--border2); border-radius: 10px;
+    padding: 12px; margin-bottom: 10px; position: relative;
+    border-left: 3px solid var(--green);
+  }
+  .op-card.loss { border-left-color: var(--red); }
+  .op-card-hd { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+  .op-card-sym { font-size: 16px; font-weight: 800; color: var(--white); }
+  .op-card-num { font-size: 10px; color: var(--w3); }
+  .op-card-pnl { font-size: 18px; font-weight: 800; text-align: right; }
+  .op-card-pnl.pos { color: var(--green); }
+  .op-card-pnl.neg { color: var(--red); }
+  .op-card-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; font-size: 10px; color: var(--w3); margin-bottom: 8px; }
+  .op-card-meta b { color: var(--w2); font-weight: 600; display: block; font-size: 9px; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 2px; }
+  .op-card-badges { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+  .op-card-nota { margin-top: 8px; }
+  .op-card-nota input { width: 100%; background: var(--bg3); border: 1px solid var(--border2); border-radius: 6px; color: var(--w2); font-size: 11px; padding: 8px 10px; outline: none; }
+  .op-card-acts { display: flex; gap: 6px; margin-top: 10px; justify-content: flex-end; }
+  .op-card-acts .op-btn { padding: 8px 12px; font-size: 14px; background: var(--bg3); border: 1px solid var(--border2); border-radius: 6px; cursor: pointer; }
+
+  /* ===== FILTROS DE OPERACIONES EN COLUMNA ===== */
+  .ops-filters { flex-direction: column !important; gap: 8px !important; align-items: stretch !important; }
+  .ops-filters input, .ops-filters select { width: 100% !important; }
+
+  /* ===== MODALES FULL-SCREEN ===== */
+  .modal, .adm-modal, .mc-modal {
+    width: 95% !important; max-width: 95% !important; max-height: 90vh !important;
+    padding: 16px !important; border-radius: 12px !important;
+  }
+
+  /* ===== CONFIGURACIÓN ===== */
+  .cfg-title { font-size: 11px; }
+  .cfg-grid { grid-template-columns: 1fr; }
+
+  /* ===== CUENTAS GRID ===== */
+  .cc-grid { grid-template-columns: repeat(2, 1fr) !important; gap: 8px !important; }
+  .cc-card { padding: 10px !important; }
+
+  /* ===== CALENDARIO ===== */
+  .cal-grid-wrap { font-size: 9px; }
+  .cal-day { min-height: 36px !important; font-size: 10px !important; }
+  .cal-hd { font-size: 8px !important; padding: 4px 2px !important; }
+
+  /* ===== INFO BOXES ===== */
+  .info-box { font-size: 10px; padding: 10px; }
+
+  /* ===== PORTADA MOBILE ===== */
+  #portada-section .port-hero { padding: 30px 16px !important; }
+  #portada-section .port-title { font-size: 24px !important; }
+  #portada-section .port-sub { font-size: 13px !important; }
+
+  /* ===== LOGIN BOX ===== */
+  .lbox { padding: 20px 22px; width: 100%; }
+  .l-logo-img { width: 60px; height: 60px; }
+
+  /* ===== ADMIN ===== */
+  .adm-g4 { grid-template-columns: repeat(2, 1fr) !important; }
+  .adm-grid { grid-template-columns: 1fr !important; }
+
+  /* ===== SCROLL MÁS GRUESO EN MOBILE ===== */
+  ::-webkit-scrollbar { width: 6px; }
+
+  /* ===== OCULTAR ELEMENTOS NO ESENCIALES ===== */
+  .tb-sep { display: none; }
+  .cal-week-col { display: none !important; }
+
+  /* ===== PORTADA MOBILE ===== */
+  /* Nav portada */
+  #portada-section nav {
+    padding: 10px 12px !important;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  #portada-section nav .nav-logo {
+    width: 42px !important;
+    height: 42px !important;
+  }
+  #portada-section nav .nav-brand {
+    font-size: 14px !important;
+  }
+  #portada-section nav > div:nth-child(2) {
+    /* Reloj central - ocultarlo en móvil */
+    display: none !important;
+  }
+  #portada-section .nav-links {
+    gap: 8px !important;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  #portada-section .nav-links a {
+    display: none !important;
+  }
+  #portada-section .theme-toggle {
+    display: none !important;
+  }
+  #portada-section .btn-nav {
+    padding: 8px 14px !important;
+    font-size: 12px !important;
+  }
+
+  /* Hero portada */
+  #portada-section .hero {
+    padding: 30px 16px 36px !important;
+  }
+  #portada-section .logo-wrap {
+    flex-direction: column;
+    gap: 12px !important;
+    margin-bottom: 18px !important;
+  }
+  #portada-section .logo-img {
+    width: 70px !important;
+    height: 70px !important;
+  }
+  #portada-section .brand-big {
+    font-size: 22px !important;
+  }
+  #portada-section .brand-since {
+    font-size: 10px !important;
+  }
+  #portada-section .hero h1 {
+    font-size: 22px !important;
+    line-height: 1.3 !important;
+    margin-bottom: 12px !important;
+  }
+  #portada-section .hero p {
+    font-size: 13px !important;
+    line-height: 1.6 !important;
+    margin-bottom: 24px !important;
+    padding: 0 4px;
+  }
+  #portada-section .btn-primary,
+  #portada-section .btn-secondary {
+    display: block !important;
+    width: 100% !important;
+    margin: 0 0 10px 0 !important;
+    padding: 14px 20px !important;
+    font-size: 14px !important;
+  }
+
+  /* Stats portada */
+  #portada-section .stats {
+    flex-wrap: wrap !important;
+    gap: 20px 0 !important;
+    padding: 20px 12px !important;
+  }
+  #portada-section .stats > div {
+    flex: 0 0 50% !important;
+    text-align: center;
+  }
+  #portada-section .stat-num {
+    font-size: 22px !important;
+  }
+  #portada-section .stat-lbl {
+    font-size: 10px !important;
+  }
+
+  /* Sections (features, plans) */
+  #portada-section .section {
+    padding: 36px 14px !important;
+  }
+  #portada-section .section-title {
+    font-size: 18px !important;
+    line-height: 1.3 !important;
+  }
+  #portada-section .section-sub {
+    font-size: 12px !important;
+    margin-bottom: 24px !important;
+  }
+  #portada-section .features {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+  }
+  #portada-section .feat {
+    padding: 16px !important;
+  }
+  #portada-section .feat h3 {
+    font-size: 14px !important;
+  }
+  #portada-section .feat p {
+    font-size: 12px !important;
+  }
+  #portada-section .plans {
+    grid-template-columns: 1fr !important;
+    gap: 18px !important;
+  }
+  #portada-section .plan {
+    padding: 22px !important;
+  }
+  #portada-section .plan-name {
+    font-size: 16px !important;
+  }
+  #portada-section .plan-price {
+    font-size: 26px !important;
+  }
+  #portada-section .plan-desc {
+    font-size: 11px !important;
+    min-height: auto !important;
+  }
+  /* ===== FIN PORTADA MOBILE ===== */
+
+  /* ===== UTILIDADES ===== */
+  .hide-mobile { display: none !important; }
+  .show-mobile { display: block !important; }
+}
+
+/* Por defecto, elementos mobile ocultos en desktop */
+.mobile-nav { display: none; }
+.mobile-more-sheet { display: none; }
+.mobile-more-backdrop { display: none; }
+#ops-cards { display: none; }
+.show-mobile { display: none; }
+@media (max-width: 900px) {
+  .mobile-nav { display: flex; }
+  .mobile-more-sheet { display: block; }
+}
+/* ===== FIN RESPONSIVE MOBILE ===== */
 </style>
 <script>
 function volverPortada(){
+  document.getElementById('login-screen').classList.remove('show');
   document.getElementById('login-screen').style.display='none';
+  document.getElementById('portada-section').classList.add('show');
   document.getElementById('portada-section').style.display='block';
 }
 function openModal(view){
+  document.getElementById('portada-section').classList.remove('show');
   document.getElementById('portada-section').style.display='none';
+  document.getElementById('login-screen').classList.add('show');
   document.getElementById('login-screen').style.display='flex';
   var tabs=document.querySelectorAll('.l-tab');
   if(view==='register'){if(tabs[1])lTab('register',tabs[1]);}
@@ -2781,58 +3160,41 @@ function doLogin(){
   if(!validEmail(email)){showLoginErr('El correo no tiene formato válido (ejemplo@dominio.com).');return;}
   // Mostrar loading
   var btn=ge('l-login-btn');if(btn){btn.disabled=true;btn.textContent='Ingresando...';}
+  // v10.25: solo autenticar. La carga de datos y enterApp() la hace onAuthStateChange -> doAutoLogin
+  // para evitar condición de carrera que causaba doble carga, lentitud (~2min) y doble click.
   sbSignIn(email, pass).then(function(res){
-    if(btn){btn.disabled=false;btn.textContent='Ingresar';}
     if(res.error){
+      if(btn){btn.disabled=false;btn.textContent='Ingresar';}
       showLoginErr('Email o contraseña incorrectos.');return;
     }
-    var user=res.data.user;
-    sbCargarUsuario(user.id).then(function(r){
-      if(!r.data){showLoginErr('No se encontró tu perfil. Contacta al administrador.');return;}
+    // Pre-chequeo rápido de estado para mostrar mensaje claro al usuario bloqueado.
+    // Si está OK, no hacemos nada más: onAuthStateChange('SIGNED_IN') tomará el control.
+    sbCargarUsuario(res.data.user.id).then(function(r){
+      if(!r.data){
+        if(btn){btn.disabled=false;btn.textContent='Ingresar';}
+        sbClient.auth.signOut();
+        showLoginErr('No se encontró tu perfil. Contacta al administrador.');return;
+      }
       var d=r.data;
-      // BLOQUEO TOTAL antes de entrar a la app
-      if(d.estado==='pendiente'){
+      if(d.estado==='pendiente'||d.estado==='rechazado'||d.estado==='suspendido'||d.estado==='pausado'){
+        if(btn){btn.disabled=false;btn.textContent='Ingresar';}
         sbClient.auth.signOut();
-        showLoginErr('⏳ Tu cuenta está pendiente de aprobación del administrador.');return;
+        var msg = d.estado==='pendiente' ? '⏳ Tu cuenta está pendiente de aprobación del administrador.'
+                : d.estado==='rechazado' ? '❌ Tu solicitud fue rechazada. Motivo: '+(d.motivo_rechazo||'Contacta al administrador')+'.'
+                : d.estado==='suspendido' ? '🔒 Tu cuenta ha sido SUSPENDIDA por el administrador. No puedes acceder hasta que sea activada nuevamente.'
+                : '⏸️ Tu cuenta ha sido PAUSADA por el administrador. No puedes acceder hasta que sea activada nuevamente.';
+        showLoginErr(msg);return;
       }
-      if(d.estado==='rechazado'){
-        sbClient.auth.signOut();
-        showLoginErr('❌ Tu solicitud fue rechazada. Motivo: '+(d.motivo_rechazo||'Contacta al administrador')+'.');return;
-      }
-      if(d.estado==='suspendido'){
-        sbClient.auth.signOut();
-        showLoginErr('🔒 Tu cuenta ha sido SUSPENDIDA por el administrador. No puedes acceder hasta que sea activada nuevamente.');return;
-      }
-      if(d.estado==='pausado'){
-        sbClient.auth.signOut();
-        showLoginErr('⏸️ Tu cuenta ha sido PAUSADA por el administrador. No puedes acceder hasta que sea activada nuevamente.');return;
-      }
-      TB_USER={id:d.id,nombre:d.nombre||email,alias:d.alias||'@usuario',email:email,desde:d.desde||new Date().toISOString().split('T')[0],rol:d.rol||'viewer',estado:d.estado||'activo',plan:d.plan||'basico',planVence:d.plan_vence||'',foto:d.foto||''};
-      // Cargar todos los datos guardados
-      Promise.all([
-        sbCargarDatos(user.id,'AC'),
-        sbCargarDatos(user.id,'CID'),
-        sbCargarDatos(user.id,'hist_data'),
-        sbCargarDatos(user.id,'tb_users')
-      ]).then(function(results){
-        if(results[0].data) AC=results[0].data;
-        if(results[1].data!==null) CID=results[1].data;
-        if(results[2].data) HIST_DATA=results[2].data;
-        if(results[3].data) TB_USERS=results[3].data;
-        // Cargar tablas compartidas
-        Promise.all([sbCargarPagos(), sbCargarMensajes(), sbCargarActividad()]).then(function(tres){
-          if(tres[0].data) TB_PAGOS = tres[0].data.map(sbPagoDesdeFila);
-          if(tres[1].data) TB_MENSAJES = tres[1].data.map(sbMensajeDesdeFila);
-          if(tres[2].data) TB_ACTIVIDAD = tres[2].data.map(sbActividadDesdeFila);
-          enterApp();
-          try { sbIniciarRealtime(); } catch(e){ console.warn('Realtime no disponible', e); }
-          try { tbRegistrarActividad(TB_USER.id,'user','login','Inicio de sesión'); } catch(e){}
-        }).catch(function(e){
-          console.warn('Tablas compartidas no disponibles. Ejecuta el SQL en Supabase.', e);
-          enterApp();
-        });
-      });
+      // Estado OK -> onAuthStateChange se encarga. Dejamos el botón en "Ingresando..." hasta que entre a la app.
+    }).catch(function(e){
+      if(btn){btn.disabled=false;btn.textContent='Ingresar';}
+      console.error('[TB] Error verificando perfil en login:', e);
+      showLoginErr('Error al verificar tu perfil. Intenta nuevamente.');
     });
+  }).catch(function(e){
+    if(btn){btn.disabled=false;btn.textContent='Ingresar';}
+    console.error('[TB] Error en signIn:', e);
+    showLoginErr('Error de conexión. Intenta nuevamente.');
   });
 }
 function previewComprobante(input){
@@ -2917,24 +3279,24 @@ function doRegister(){
   }
 }
 function enterApp(){
-  ge('login-screen').style.display='none';
+  var login=ge('login-screen');if(login){login.classList.remove('show');login.style.display='none';}
   var port=document.getElementById('portada-section');
-  if(port)port.style.display='none';
+  if(port){port.classList.remove('show');port.style.display='none';}
   ge('app').classList.add('open');
   initApp();
 }
 function logout(){
+  // v10.25: marca para que onAuthStateChange no interfiera, espera signOut y recarga.
+  // Esto elimina la "pantalla negra" al cerrar sesión y garantiza estado limpio.
+  window._tbLogoutInProgress = true;
   try { if(TB_USER&&TB_USER.id) tbRegistrarActividad(TB_USER.id,'user','logout','Cierre de sesión'); } catch(e){}
   try { sbLimpiarRealtime(); } catch(e){}
-  sbSignOut();
-  ge('login-screen').style.display='none';
-  var port=document.getElementById('portada-section');
-  if(port)port.style.display='block';
-  ge('app').classList.remove('open');
-  if(ge('l-email'))ge('l-email').value='';if(ge('l-pass'))ge('l-pass').value='';
-  if(ge('l-login-err'))ge('l-login-err').style.display='none';
-  // Reset flag para que un nuevo login funcione
-  _autoLoginDone = false;
+  sbSignOut().then(function(){
+    window.location.replace(window.location.pathname);
+  }).catch(function(e){
+    console.warn('[TB] Error en signOut, forzando recarga:', e);
+    window.location.replace(window.location.pathname);
+  });
 }
 function nav(name,el){
   document.querySelectorAll('.page').forEach(function(p){p.classList.remove('on');});
@@ -3227,10 +3589,12 @@ function calcDiasOperados(){
   var hist=typeof HIST_DATA!=='undefined'?HIST_DATA:[];
   hist.forEach(function(r){if(!r.rej&&r.fecha){if(!ultimoRetiro||r.fecha>ultimoRetiro)ultimoRetiro=r.fecha;}});
   // Contar dias unicos con operaciones desde ese retiro
+  // v10.25: usamos >= para que el día del retiro cuente como día 1 del nuevo ciclo
+  // (si apruebas retiro hoy y operas hoy, debe contar).
   var fechasOps=TRADES.map(function(t){return t[2];}).filter(Boolean);
   var unique={};
   fechasOps.forEach(function(f){
-    if(!ultimoRetiro||f>ultimoRetiro) unique[f]=1;
+    if(!ultimoRetiro||f>=ultimoRetiro) unique[f]=1;
   });
   var diasOp=Object.keys(unique).length;
   var listo=diasOp>=min;
@@ -4517,6 +4881,8 @@ function saveEmot(){
   document.querySelectorAll('.err-tag.on').forEach(function(e){e.classList.remove('on');});
   if(notasEl)notasEl.value='';
   buildEmotHist();
+  // v10.25: persistir en Supabase. Sin esto, las emociones se perdían al cerrar sesión.
+  try{ guardarActual(); }catch(e){ console.warn('[TB] No se pudo guardar emociones en nube',e); }
   toast('Registro guardado','Emociones','green');
 }
 function editEmot(idx){
@@ -4532,6 +4898,8 @@ function editEmot(idx){
 function delEmot(idx){
   if(!confirm('Eliminar?'))return;
   EMOT_DATA.splice(idx,1);buildEmotHist();
+  // v10.25: persistir eliminación en Supabase
+  try{ guardarActual(); }catch(e){ console.warn('[TB] No se pudo guardar emociones en nube',e); }
   toast('Eliminado','Emociones','red');
 }
 function buildEmotHist(){
@@ -7571,5 +7939,236 @@ alter publication supabase_realtime add table public.actividad;
  - Si una tabla ya existía y tiene datos viejos, el SQL no los borra.
  ═══════════════════════════════════════════════════════════════════════════════
 -->
+
+<!-- ═══════ BARRA INFERIOR MOBILE (v10.22) ═══════ -->
+<div class="mobile-nav" id="mobile-nav">
+  <div class="mobile-nav-item on" id="mn-dash" onclick="mnGo('dashboard',this)">
+    <span class="mn-ico">📊</span><span>Panel</span>
+  </div>
+  <div class="mobile-nav-item" id="mn-ops" onclick="mnGo('operaciones',this)">
+    <span class="mn-ico">📝</span><span>Ops</span>
+  </div>
+  <div class="mobile-nav-item" id="mn-ret" onclick="mnGo('retiros',this)">
+    <span class="mn-ico">💰</span><span>Retiros</span>
+  </div>
+  <div class="mobile-nav-item" id="mn-stats" onclick="mnGoStats(this)">
+    <span class="mn-ico">📈</span><span>Stats</span>
+  </div>
+  <div class="mobile-nav-item" id="mn-more" onclick="mnToggleMore()">
+    <span class="mn-ico">☰</span><span>Más</span>
+  </div>
+</div>
+
+<!-- Bottom sheet "Más" -->
+<div class="mobile-more-backdrop" id="mmb" onclick="mnToggleMore()"></div>
+<div class="mobile-more-sheet" id="mms">
+  <div class="mobile-more-title">Cuentas</div>
+  <div class="mobile-more-grid">
+    <div class="mobile-more-item" onclick="mnGoTipo('live')"><span class="mmi-ico">💚</span>Live</div>
+    <div class="mobile-more-item" onclick="mnGoTipo('fase1')"><span class="mmi-ico">🔵</span>1era Fase</div>
+    <div class="mobile-more-item" onclick="mnGoTipo('fase2')"><span class="mmi-ico">🟣</span>2da Fase</div>
+    <div class="mobile-more-item" onclick="mnGoTipo('real')"><span class="mmi-ico">💼</span>Cuenta Real</div>
+  </div>
+  <div class="mobile-more-title" style="margin-top:18px;">Menú</div>
+  <div class="mobile-more-grid">
+    <div class="mobile-more-item" onclick="mnGoExtra('resumenes')"><span class="mmi-ico">📋</span>Resúmenes</div>
+    <div class="mobile-more-item" onclick="mnGoExtra('graficos')"><span class="mmi-ico">📈</span>Gráficos</div>
+    <div class="mobile-more-item" onclick="mnGoExtra('calendario')"><span class="mmi-ico">📅</span>Calendario</div>
+    <div class="mobile-more-item" onclick="mnGoExtra('emociones')"><span class="mmi-ico">😌</span>Emociones</div>
+    <div class="mobile-more-item" onclick="mnGoExtra('notas')"><span class="mmi-ico">📓</span>Notas</div>
+    <div class="mobile-more-item" onclick="mnGoExtra('reglas')"><span class="mmi-ico">🛡</span>Reglas</div>
+    <div class="mobile-more-item" onclick="mnGoExtra('certificados')"><span class="mmi-ico">📄</span>Certificados</div>
+    <div class="mobile-more-item" onclick="mnGoExtra('config')"><span class="mmi-ico">⚙️</span>Configuración</div>
+    <div class="mobile-more-item" onclick="mnGoMiCuenta()"><span class="mmi-ico">👤</span>Mi Cuenta</div>
+    <div class="mobile-more-item" onclick="mnGoAdmin()" id="mn-admin-link"><span class="mmi-ico">🔐</span>Administrador</div>
+    <div class="mobile-more-item" onclick="logout();mnToggleMore();" style="grid-column:span 3;background:rgba(255,71,87,.08);border-color:rgba(255,71,87,.3);color:var(--red);"><span class="mmi-ico">🚪</span>Cerrar Sesión</div>
+  </div>
+</div>
+
+<script>
+// ═══ NAV MOBILE (v10.22) ═══
+function mnClearActive(){
+  document.querySelectorAll('.mobile-nav-item').forEach(function(i){i.classList.remove('on');});
+}
+function mnGo(pageName, el){
+  mnClearActive();
+  if(el)el.classList.add('on');
+  // Cerrar sheet si está abierto
+  var mms=document.getElementById('mms');if(mms)mms.classList.remove('on');
+  var mmb=document.getElementById('mmb');if(mmb)mmb.classList.remove('on');
+  // Llamar al nav normal
+  if(typeof nav==='function'){
+    // Simular click en el nav item correspondiente
+    var target=document.querySelector('.nav-i[onclick*="nav(\''+pageName+'\'"]');
+    nav(pageName, target);
+  }
+}
+function mnGoStats(el){
+  mnClearActive();
+  if(el)el.classList.add('on');
+  var mms=document.getElementById('mms');if(mms)mms.classList.remove('on');
+  var mmb=document.getElementById('mmb');if(mmb)mmb.classList.remove('on');
+  if(typeof navStats==='function'){
+    var target=document.querySelector('.nav-i[onclick*="navStats"]');
+    navStats(target);
+  }
+}
+function mnGoExtra(pageName){
+  mnClearActive();
+  var mnMore=document.getElementById('mn-more');if(mnMore)mnMore.classList.add('on');
+  var mms=document.getElementById('mms');if(mms)mms.classList.remove('on');
+  var mmb=document.getElementById('mmb');if(mmb)mmb.classList.remove('on');
+  if(typeof nav==='function'){
+    var target=document.querySelector('.nav-i[onclick*="nav(\''+pageName+'\'"]');
+    nav(pageName, target);
+  }
+}
+function mnGoTipo(tipo){
+  mnClearActive();
+  var mnMore=document.getElementById('mn-more');if(mnMore)mnMore.classList.add('on');
+  var mms=document.getElementById('mms');if(mms)mms.classList.remove('on');
+  var mmb=document.getElementById('mmb');if(mmb)mmb.classList.remove('on');
+  if(typeof navTipo==='function'){
+    navTipo(tipo, null);
+  }
+}
+function mnGoMiCuenta(){
+  mnClearActive();
+  var mnMore=document.getElementById('mn-more');if(mnMore)mnMore.classList.add('on');
+  var mms=document.getElementById('mms');if(mms)mms.classList.remove('on');
+  var mmb=document.getElementById('mmb');if(mmb)mmb.classList.remove('on');
+  if(typeof navMiCuenta==='function') navMiCuenta('perfil',null);
+}
+function mnGoAdmin(){
+  mnClearActive();
+  var mnMore=document.getElementById('mn-more');if(mnMore)mnMore.classList.add('on');
+  var mms=document.getElementById('mms');if(mms)mms.classList.remove('on');
+  var mmb=document.getElementById('mmb');if(mmb)mmb.classList.remove('on');
+  if(typeof navAdministrador==='function') navAdministrador(null);
+}
+function mnToggleMore(){
+  var mms=document.getElementById('mms');
+  var mmb=document.getElementById('mmb');
+  if(!mms||!mmb)return;
+  var isOpen=mms.classList.contains('on');
+  if(isOpen){
+    mms.classList.remove('on');
+    mmb.classList.remove('on');
+  } else {
+    mms.classList.add('on');
+    mmb.classList.add('on');
+  }
+}
+
+// Ocultar link admin si usuario no es admin
+(function(){
+  var checkAdmin=function(){
+    var link=document.getElementById('mn-admin-link');
+    if(!link)return;
+    if(typeof TB_USER!=='undefined' && TB_USER && TB_USER.rol==='admin'){
+      link.style.display='';
+    } else {
+      link.style.display='none';
+    }
+  };
+  setInterval(checkAdmin,2000);
+})();
+
+// ═══ RENDERIZAR OPERACIONES COMO TARJETAS (mobile) ═══
+// Interceptamos renderOps: si es mobile, pintamos cards en paralelo
+(function(){
+  var _origRenderOps=null;
+  function wrapRenderOps(){
+    if(typeof window.renderOps!=='function')return;
+    if(_origRenderOps)return;
+    _origRenderOps=window.renderOps;
+    window.renderOps=function(list){
+      _origRenderOps(list);
+      // Renderizar cards en mobile
+      var cardsContainer=document.getElementById('ops-cards');
+      if(!cardsContainer){
+        var tbl=document.getElementById('ops-tbody');
+        if(tbl && tbl.parentNode && tbl.parentNode.parentNode){
+          cardsContainer=document.createElement('div');
+          cardsContainer.id='ops-cards';
+          cardsContainer.style.display='none';
+          tbl.parentNode.parentNode.parentNode.insertBefore(cardsContainer, tbl.parentNode.parentNode.nextSibling);
+        }
+      }
+      if(!cardsContainer)return;
+      var html='';
+      if(!list || !list.length){
+        html='<div style="text-align:center;color:var(--w3);padding:30px;background:var(--bg2);border-radius:10px;">Sin operaciones</div>';
+      } else {
+        var idxMap=new Map();
+        if(typeof TRADES!=='undefined'){
+          TRADES.forEach(function(t,i){idxMap.set(t,i);});
+        }
+        list.forEach(function(t){
+          var n=parseFloat(t[7])||0;
+          var pnlClass=n>=0?'pos':'neg';
+          var pnlTxt=(n>=0?'+$':'-$')+Math.abs(n).toFixed(2);
+          var ti=idxMap.has(t)?idxMap.get(t):(TRADES?TRADES.indexOf(t):0);
+          var numMostrado=(typeof TRADES!=='undefined')?(TRADES.length-ti):(t[0]||'--');
+          var cardClass='op-card'+(n<0?' loss':'');
+          var nota=(t[13]||'').replace(/"/g,'&quot;');
+          html+='<div class="'+cardClass+'">';
+          html+='<div class="op-card-hd">';
+          html+='<div><div class="op-card-sym">'+t[1].toUpperCase()+'</div><div class="op-card-num">#'+numMostrado+' · '+t[2]+'</div></div>';
+          html+='<div class="op-card-pnl '+pnlClass+'">'+pnlTxt+'</div>';
+          html+='</div>';
+          html+='<div class="op-card-meta">';
+          html+='<div><b>Apertura</b>'+(t[3]||'--')+' · $'+parseFloat(t[5]||0).toFixed(2)+'</div>';
+          html+='<div><b>Cierre</b>'+(t[4]||'--')+' · $'+parseFloat(t[6]||0).toFixed(2)+'</div>';
+          html+='<div><b>Lotaje</b>'+(t[9]||'--')+'</div>';
+          html+='<div><b>Pips</b>'+(t[10]||'--')+'</div>';
+          html+='<div><b>Riesgo</b>'+(t[12]?'$'+parseFloat(t[12]).toFixed(2):'--')+'</div>';
+          html+='<div><b>Tipo</b>'+t[8]+'</div>';
+          html+='</div>';
+          html+='<div class="op-card-badges">';
+          html+='<span class="bdg '+(t[8]==='COMPRA'?'bdg-buy':'bdg-sell')+'">'+t[8]+'</span>';
+          html+='<span class="bdg '+(t[11]==='GANADA'?'bdg-win':'bdg-loss')+'">'+t[11]+'</span>';
+          html+='</div>';
+          html+='<div class="op-card-nota"><input type="text" value="'+nota+'" placeholder="Nota..." onchange="TRADES['+ti+'][13]=this.value;tbGuardarTradesActual()"></div>';
+          html+='<div class="op-card-acts">';
+          html+='<button class="op-btn" onclick="editTrade('+ti+')" title="Editar">✏️ Editar</button>';
+          html+='<button class="op-btn" onclick="delTrade('+ti+')" title="Eliminar" style="color:var(--red)">🗑️ Borrar</button>';
+          html+='</div>';
+          html+='</div>';
+        });
+      }
+      cardsContainer.innerHTML=html;
+    };
+  }
+  // Intentar wrap cada 500ms hasta que renderOps esté definida
+  var attempts=0;
+  var wrapInterval=setInterval(function(){
+    attempts++;
+    if(typeof window.renderOps==='function'){
+      wrapRenderOps();
+      clearInterval(wrapInterval);
+    } else if(attempts>40){
+      clearInterval(wrapInterval);
+    }
+  },500);
+})();
+
+// Al inicializar app, ocultar barra si no está logueado
+(function(){
+  var checkNav=function(){
+    var nav=document.getElementById('mobile-nav');
+    var app=document.getElementById('app');
+    if(!nav||!app)return;
+    var isOpen=app.classList.contains('open');
+    nav.style.display=isOpen?'':'none';
+    if(!isOpen){
+      var mms=document.getElementById('mms');if(mms)mms.classList.remove('on');
+      var mmb=document.getElementById('mmb');if(mmb)mmb.classList.remove('on');
+    }
+  };
+  setInterval(checkNav,1000);
+})();
+</script>
+
 </body>
 </html>
