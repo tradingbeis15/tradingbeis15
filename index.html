@@ -1,21 +1,43 @@
 <!--
 ═══════════════════════════════════════════════════════════════════════
-TRADINGBEIS v30 - Manejo retiros rechazados
-Build: 2026-07-12
-Cambios desde v29:
-  PUNTO 1: Bug corregido - retiros rechazados YA NO suman en "Total
-           Retirado" ni en el saldo actual. Antes sumaban aunque fueran
-           rechazados. Aplica a Dashboard, Retiros, Cuentas, Overview,
-           Mi Parte, Saldo Actual y todos los cálculos derivados.
-  PUNTO 2: NUEVA tarjeta "Total Rechazados" en Dashboard (al lado
-           de Total Retirado) y en pestaña Retiros (arriba del historial).
-           Muestra la suma de retiros marcados como rechazados y contador.
-  PUNTO 3: En el calendario, los retiros rechazados ahora se marcan en
-           rojo en la FECHA DE APROBACIÓN (fa), no en la programada (fr).
-           Si no hay fa, se marca en fr como fallback.
+TRADINGBEIS v34 - Saldo Actual resta rechazados
+Build: 2026-07-13
+Cambios desde v33:
+  PUNTO 1: Fórmula actualizada del "Saldo Actual":
+           Saldo = Tamaño + P&L - Retirados - Rechazados
+           Antes: solo se restaban los aprobados. Los rechazados también
+           salieron de la cuenta en cTrader, así que ahora se restan.
+  PUNTO 2: Aplica en Dashboard, Operaciones y tarjetas de cuenta Live.
+  PUNTO 3: Subtitle actualizado "Tamaño + P&L - Retiros - Rechazados".
 
 ---- Historico ----
-TRADINGBEIS v24 - Notificaciones depuradas (8 tipos)
+TRADINGBEIS v33 - Cuentas de fase aprobadas
+Build: 2026-07-13
+Cambios desde v32:
+  PUNTO 1: Nuevo botón "Aprobada" (verde) solo en tarjetas de cuenta
+           1era Fase y 2da Fase. Al hacer click marca la cuenta con fecha
+           y muestra badge "APROBADA".
+  PUNTO 2: Botón cambia a "Desmarcar" si ya está aprobada (para revertir).
+  PUNTO 3: Badge visual "✅ APROBADA" en la tarjeta con la fecha debajo.
+  PUNTO 4: Banner verde en el Dashboard cuando entras a una cuenta
+           aprobada: muestra fecha y botón "Desmarcar" rápido.
+  PUNTO 5: Solo indicador visual. NO cambia el tipo de cuenta ni afecta
+           cálculos, P&L, retiros ni nada. Persistencia en Supabase.
+
+---- Historico ----
+TRADINGBEIS v32 - Cuentas canceladas por la empresa
+Build: 2026-07-13
+Cambios desde v31:
+  PUNTO 1: Nueva opción "Cancelar cuenta" en la tarjeta de cada cuenta
+           (junto a Eliminar). Pide motivo obligatorio y guarda la fecha.
+  PUNTO 2: Badge visual "❌ CANCELADA" en la tarjeta con el motivo debajo.
+           Botón cambia a "Reactivar" (verde) para revertir.
+  PUNTO 3: Banner en el Dashboard cuando entras a una cuenta cancelada:
+           muestra motivo, fecha y botón "Reactivar" rápido.
+  PUNTO 4: Es solo un indicador visual. NO afecta cálculos, P&L, retiros,
+           notificaciones ni ninguna suma global. Todo sigue igual.
+  PUNTO 5: Persistencia en Supabase (AC[i].cancelada, motivoCancelacion,
+           fechaCancelacion). Reversible en cualquier momento.
 Build: 2026-04-25
 Cambios desde v23:
   PUNTO 1: Eliminadas notificaciones: proxima noticia, ultima operacion,
@@ -61,7 +83,7 @@ Creado por Daniel Pérez
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>TRADINGBEIS v30</title>
+<title>TRADINGBEIS v34</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 // ─── SUPABASE CONFIG ───────────────────────────────────────────
@@ -974,6 +996,16 @@ nav{flex:1;padding:6px 0;overflow-y:auto;}
 .cc-card:hover{transform:translateY(-3px);box-shadow:0 12px 30px rgba(0,0,0,.4);}
 .cc-card.activa{border-color:var(--gold);box-shadow:0 8px 24px rgba(212,168,67,.2);}
 .cc-card.activa::after{content:"ACTIVA";position:absolute;top:8px;right:8px;font-size:8px;font-weight:700;padding:2px 7px;border-radius:20px;background:var(--gdim);color:var(--gold);border:1px solid rgba(212,168,67,.3);}
+/* v32: badge de cuenta cancelada */
+.cc-card.cancelada{border-color:var(--red)!important;opacity:.85;}
+.cc-card.cancelada::before{content:"CANCELADA";position:absolute;top:8px;left:8px;font-size:8px;font-weight:700;padding:2px 7px;border-radius:20px;background:rgba(255,71,87,.15);color:var(--red);border:1px solid rgba(255,71,87,.4);z-index:2;}
+.cc-cancel-info{background:rgba(255,71,87,.08);border:1px solid rgba(255,71,87,.25);border-radius:5px;padding:5px 8px;margin:6px 0;font-size:9px;color:var(--red);line-height:1.4;}
+.cc-cancel-info b{font-weight:700;}
+/* v33: badge cuenta aprobada (fases) */
+.cc-card.aprobada{border-color:var(--green)!important;}
+.cc-card.aprobada:not(.cancelada)::before{content:"APROBADA";position:absolute;top:8px;left:8px;font-size:8px;font-weight:700;padding:2px 7px;border-radius:20px;background:rgba(34,197,94,.15);color:var(--green);border:1px solid rgba(34,197,94,.4);z-index:2;}
+.cc-aprob-info{background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.25);border-radius:5px;padding:5px 8px;margin:6px 0;font-size:9px;color:var(--green);line-height:1.4;}
+.cc-aprob-info b{font-weight:700;}
 .cc-card.vacia{opacity:.4;border-style:dashed;cursor:pointer;}
 .cc-card.vacia:hover{opacity:.8;}
 .cc-empresa{font-size:13px;font-weight:700;color:var(--white);margin-bottom:2px;}
@@ -1713,8 +1745,8 @@ body.light-mode .tb-version-tag{color:rgba(0,0,0,0.2);}
 </style>
 <script>
 // v05: marca de version para diagnostico en consola
-console.log('%c[TB] TRADINGBEIS v30 cargado','color:#d4a843;font-weight:bold;font-size:12px;');
-window.TB_VERSION = 'v30';
+console.log('%c[TB] TRADINGBEIS v34 cargado','color:#d4a843;font-weight:bold;font-size:12px;');
+window.TB_VERSION = 'v34';
 
 function volverPortada(){
   document.getElementById('login-screen').classList.remove('show');
@@ -2567,6 +2599,29 @@ function openModal(view){
   <div id="stats-body"></div>
 </div>
 <div class="page on" id="page-dashboard">
+  <!-- v32: banner cuenta cancelada -->
+  <div id="dash-cancelada-banner" style="display:none;background:linear-gradient(90deg,rgba(255,71,87,.15),rgba(255,71,87,.05));border:1px solid rgba(255,71,87,.4);border-radius:10px;padding:12px 16px;margin-bottom:14px;">
+    <div style="display:flex;align-items:center;gap:12px;">
+      <div style="font-size:24px;">❌</div>
+      <div style="flex:1;">
+        <div style="font-size:13px;font-weight:700;color:var(--red);letter-spacing:.04em;">CUENTA CANCELADA</div>
+        <div id="dash-cancelada-motivo" style="font-size:11px;color:var(--white);margin-top:3px;">--</div>
+        <div id="dash-cancelada-fecha" style="font-size:9px;color:var(--w3);margin-top:2px;">--</div>
+      </div>
+      <button onclick="reactivarCuenta(CID,event)" style="background:rgba(34,197,94,.12);border:1px solid var(--green);border-radius:6px;padding:5px 12px;color:var(--green);font-size:10px;font-weight:600;cursor:pointer;">Reactivar</button>
+    </div>
+  </div>
+  <!-- v33: banner cuenta aprobada (fases) -->
+  <div id="dash-aprobada-banner" style="display:none;background:linear-gradient(90deg,rgba(34,197,94,.15),rgba(34,197,94,.05));border:1px solid rgba(34,197,94,.4);border-radius:10px;padding:12px 16px;margin-bottom:14px;">
+    <div style="display:flex;align-items:center;gap:12px;">
+      <div style="font-size:24px;">✅</div>
+      <div style="flex:1;">
+        <div style="font-size:13px;font-weight:700;color:var(--green);letter-spacing:.04em;">FASE APROBADA</div>
+        <div id="dash-aprobada-fecha" style="font-size:11px;color:var(--white);margin-top:3px;">--</div>
+      </div>
+      <button onclick="desmarcarAprobada(CID,event)" style="background:rgba(212,168,67,.12);border:1px solid var(--gold);border-radius:6px;padding:5px 12px;color:var(--gold);font-size:10px;font-weight:600;cursor:pointer;">Desmarcar</button>
+    </div>
+  </div>
   <div class="ph"><div><h2>📊 Dashboard</h2><div class="ph-sub" id="ph-sub-dashboard">--</div></div></div>
   <div class="slbl">Cuenta Activa</div>
   <div class="g6" style="margin-bottom:8px;">
@@ -2584,7 +2639,7 @@ function openModal(view){
     <div class="sc"><div class="sc-lbl">Capital Inicial</div><div class="sc-val" id="dash-capital">$100,000</div></div>
   </div>
   <div class="g3" style="margin-bottom:13px;">
-    <div class="sc grt"><div class="sc-lbl">💰 Saldo Actual</div><div class="sc-val pos" id="dash-saldo-actual" style="color:var(--gold);font-size:22px;">$0.00</div><div class="sc-sub">Tamaño + P&L - Retiros</div></div>
+    <div class="sc grt"><div class="sc-lbl">💰 Saldo Actual</div><div class="sc-val pos" id="dash-saldo-actual" style="color:var(--gold);font-size:22px;">$0.00</div><div class="sc-sub">Tamaño + P&L - Retiros - Rechazados</div></div>
   </div>
   <div class="slbl">Estadisticas</div>
   <div class="g6" style="margin-bottom:8px;">
@@ -4825,17 +4880,21 @@ function updateAllStats(){
   var ventas=TRADES.filter(function(t){return t[8]==='VENTA';}).length;
   var division=getDivision();
   var totalRetirado=HIST_DATA.reduce(function(s,r){return s+(r.rej?0:(r.monto||0));},0);
-  var disponible=pnlTotal>0?Math.max(0,pnlTotal-totalRetirado):0;
+  // v31: los retiros rechazados tambien restan del disponible
+  var totalRechazadosCalc=HIST_DATA.reduce(function(s,r){return s+(r.rej?(r.monto||0):0);},0);
+  var disponible=pnlTotal>0?Math.max(0,pnlTotal-totalRetirado-totalRechazadosCalc):0;
   var pnlPct=(pnlTotal/100000*100).toFixed(2);
 
   // Dashboard
   var u=function(id,v){var e=ge(id);if(e)e.textContent=v;};
   var dbEl=ge('dash-balance');if(dbEl){dbEl.textContent='$'+balance.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});dbEl.style.color=pnlTotal<0?'var(--red)':pnlTotal>0?'var(--green)':'var(--w2)';}
-  // v10: Saldo Actual = tamano de cuenta activa + P&L - retiros aprobados
+  // v10: Saldo Actual = tamano de cuenta activa + P&L - retiros aprobados - rechazados (v34)
   try{
     var _ca=AC&&AC[CID]?AC[CID]:null;
     var _tam=_ca&&_ca.tamano?parseFloat(_ca.tamano)||0:0;
-    var _saldoActual=_tam+pnlTotal-totalRetirado;
+    // v34: sumar tambien los rechazados para que coincida con cTrader
+    var _rejTotal=HIST_DATA.reduce(function(s,r){return s+(r.rej?(r.monto||0):0);},0);
+    var _saldoActual=_tam+pnlTotal-totalRetirado-_rejTotal;
     var saEl=ge('dash-saldo-actual');
     if(saEl){
       saEl.textContent='$'+_saldoActual.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -5209,7 +5268,9 @@ function updateRetCards(){
   var pct=getDivision();var pctNum=Math.round(pct*100);
   var pnlTotal=TRADES.reduce(function(s,t){return s+(parseFloat(t[7])||0);},0);
   var totalRetirado=HIST_DATA.reduce(function(s,r){return s+(r.rej?0:(r.monto||0));},0);
-  var disponible=pnlTotal>0?Math.max(0,pnlTotal-totalRetirado):0;
+  // v31: los retiros rechazados tambien restan del disponible
+  var totalRechazadosCalc=HIST_DATA.reduce(function(s,r){return s+(r.rej?(r.monto||0):0);},0);
+  var disponible=pnlTotal>0?Math.max(0,pnlTotal-totalRetirado-totalRechazadosCalc):0;
   var monto=disponible.toFixed(2);
   var pctNum2=Math.round(pct*100);
   var miParteDisp=disponible*pct;
@@ -6300,6 +6361,28 @@ function updSubtitles(c){
 }
 function updTop(c){
   var ge=function(id){return document.getElementById(id);};
+  // v32: banner de cuenta cancelada en dashboard
+  var _bcanc=ge('dash-cancelada-banner');
+  if(_bcanc){
+    if(c && c.cancelada){
+      _bcanc.style.display='block';
+      var _bm=ge('dash-cancelada-motivo');if(_bm)_bm.textContent=c.motivoCancelacion||'Sin motivo';
+      var _bf=ge('dash-cancelada-fecha');if(_bf)_bf.textContent='Cancelada el '+(c.fechaCancelacion||'--');
+    } else {
+      _bcanc.style.display='none';
+    }
+  }
+  // v33: banner de fase aprobada
+  var _bapr=ge('dash-aprobada-banner');
+  if(_bapr){
+    if(c && c.aprobada && !c.cancelada && (c.tipo==='fase1' || c.tipo==='fase2')){
+      _bapr.style.display='block';
+      var _baf=ge('dash-aprobada-fecha');
+      if(_baf) _baf.textContent=(c.tipo==='fase1'?'1era Fase':'2da Fase')+' aprobada el '+(c.fechaAprobacion||'--');
+    } else {
+      _bapr.style.display='none';
+    }
+  }
   var tam=c.tamano>=1000?'$'+(c.tamano/1000)+'K':'$'+(c.tamano||0);
   var tba=ge('tb-acc');if(tba)tba.textContent=(c.empresa||c.ncuenta)?((c.empresa||'--')+' · #'+(c.ncuenta||'--')+' · '+tam):'Cuenta';
   var tbr=document.querySelector('.tb-role');if(tbr)tbr.textContent='Trader · '+(c.empresa||'--');
@@ -6480,6 +6563,87 @@ function elimCuenta(idx,ev){
   if(typeof toast==='function') toast(nom+' eliminada','','red');
 }
 
+// v32: cancelar cuenta (marca como cancelada por la empresa, mantiene datos)
+function cancelarCuenta(idx,ev){
+  if(ev)ev.stopPropagation();
+  var c=AC[idx];
+  if(!c) return;
+  var nom=(c.empresa||'Cuenta')+(c.ncuenta?' #'+c.ncuenta:'');
+  var motivo = prompt('Motivo de cancelación de '+nom+':\n\n(Ej: Violación de reglas, incumplimiento de objetivo, cancelación voluntaria...)');
+  if(motivo===null) return;
+  motivo = (motivo||'').trim();
+  if(!motivo){ if(typeof toast==='function') toast('El motivo es obligatorio','Cuenta','red'); return; }
+  c.cancelada = true;
+  c.motivoCancelacion = motivo;
+  c.fechaCancelacion = (typeof tzTodayStr==='function') ? tzTodayStr() : (new Date().toISOString().slice(0,10));
+  renderTipo(c.tipo);
+  try {
+    if(typeof TB_USER!=='undefined' && TB_USER && TB_USER.id && typeof sbGuardarDatos==='function'){
+      sbGuardarDatos(TB_USER.id,'AC',AC);
+    }
+  } catch(e){ console.warn('[TB] Error guardando cancelacion:',e); }
+  if(typeof toast==='function') toast(nom+' marcada como cancelada','Cuenta','red');
+}
+
+// v33: marcar cuenta de fase como aprobada
+function marcarAprobada(idx,ev){
+  if(ev)ev.stopPropagation();
+  var c=AC[idx];
+  if(!c) return;
+  if(c.tipo!=='fase1' && c.tipo!=='fase2'){ if(typeof toast==='function') toast('Solo aplica a cuentas de fase','Cuenta','red'); return; }
+  var nom=(c.empresa||'Cuenta')+(c.ncuenta?' #'+c.ncuenta:'');
+  if(!confirm('¿Marcar '+nom+' como fase APROBADA?')) return;
+  c.aprobada = true;
+  c.fechaAprobacion = (typeof tzTodayStr==='function') ? tzTodayStr() : (new Date().toISOString().slice(0,10));
+  renderTipo(c.tipo);
+  // Si es la cuenta activa, actualizar top y banner
+  if(idx===CID){ try{ updTop(c); }catch(e){} }
+  try {
+    if(typeof TB_USER!=='undefined' && TB_USER && TB_USER.id && typeof sbGuardarDatos==='function'){
+      sbGuardarDatos(TB_USER.id,'AC',AC);
+    }
+  } catch(e){ console.warn('[TB] Error guardando aprobacion:',e); }
+  if(typeof toast==='function') toast(nom+' marcada como APROBADA','Cuenta','green');
+}
+
+// v33: desmarcar aprobada
+function desmarcarAprobada(idx,ev){
+  if(ev)ev.stopPropagation();
+  var c=AC[idx];
+  if(!c) return;
+  var nom=(c.empresa||'Cuenta')+(c.ncuenta?' #'+c.ncuenta:'');
+  if(!confirm('¿Desmarcar '+nom+' como aprobada?')) return;
+  c.aprobada = false;
+  delete c.fechaAprobacion;
+  renderTipo(c.tipo);
+  if(idx===CID){ try{ updTop(c); }catch(e){} }
+  try {
+    if(typeof TB_USER!=='undefined' && TB_USER && TB_USER.id && typeof sbGuardarDatos==='function'){
+      sbGuardarDatos(TB_USER.id,'AC',AC);
+    }
+  } catch(e){ console.warn('[TB] Error guardando desmarcacion:',e); }
+  if(typeof toast==='function') toast(nom+' desmarcada','Cuenta','gold');
+}
+
+// v32: reactivar cuenta cancelada
+function reactivarCuenta(idx,ev){
+  if(ev)ev.stopPropagation();
+  var c=AC[idx];
+  if(!c) return;
+  var nom=(c.empresa||'Cuenta')+(c.ncuenta?' #'+c.ncuenta:'');
+  if(!confirm('¿Reactivar '+nom+'?\n\nSe eliminará el estado "Cancelada" y su motivo.')) return;
+  c.cancelada = false;
+  delete c.motivoCancelacion;
+  delete c.fechaCancelacion;
+  renderTipo(c.tipo);
+  try {
+    if(typeof TB_USER!=='undefined' && TB_USER && TB_USER.id && typeof sbGuardarDatos==='function'){
+      sbGuardarDatos(TB_USER.id,'AC',AC);
+    }
+  } catch(e){ console.warn('[TB] Error guardando reactivacion:',e); }
+  if(typeof toast==='function') toast(nom+' reactivada','Cuenta','green');
+}
+
 // Navegar a tipo de cuenta
 function navTipo(tipo,el){
   document.querySelectorAll('#nav-l1 .nav-i').forEach(function(n){n.classList.remove('on');});
@@ -6544,9 +6708,11 @@ function renderTipo(tipo){
       var cap=c.capital||c.tamano||0;
       var bal=cap+pnl;
       var ret=tipo==='live'?(c.H||[]).reduce(function(s,r){return s+(r.rej?0:(r.monto||0));},0):0;
-      // v10: Saldo Actual = Tamano cuenta + P&L - Retiros aprobados
+      // v34: restar tambien los rechazados
+      var rej=tipo==='live'?(c.H||[]).reduce(function(s,r){return s+(r.rej?(r.monto||0):0);},0):0;
+      // v10: Saldo Actual = Tamano cuenta + P&L - Retiros aprobados - Rechazados (v34)
       var tamCuenta=c.tamano||0;
-      var saldoActual=tamCuenta+pnl-ret;
+      var saldoActual=tamCuenta+pnl-ret-rej;
       var ops=(c.T||[]).length;
       var gan=(c.T||[]).filter(function(t){return t[11]==='GANADA';}).length;
       var wr=ops>0?(gan/ops*100).toFixed(0):0;
@@ -6573,9 +6739,20 @@ function renderTipo(tipo){
         });
       }
 
-      html+='<div class="cc-card '+tipo+(isAct?' activa':'')+'" onclick="entrarCuenta('+gi+')">';
+      html+='<div class="cc-card '+tipo+(isAct?' activa':'')+(c.cancelada?' cancelada':'')+(c.aprobada?' aprobada':'')+'" onclick="entrarCuenta('+gi+')">';
       html+='<div class="cc-empresa">'+(c.empresa||'Cuenta')+'</div>';
       html+='<div class="cc-num">#'+(c.ncuenta||'--')+' · '+(c.modelo||tipo)+'</div>';
+      // v32: info de cancelacion si aplica
+      if(c.cancelada){
+        var fCanc = c.fechaCancelacion || '';
+        var motivoTxt = c.motivoCancelacion ? c.motivoCancelacion : 'Sin motivo especificado';
+        html+='<div class="cc-cancel-info" onclick="event.stopPropagation();"><b>❌ Cancelada</b>'+(fCanc?' · '+fCanc:'')+'<br>'+motivoTxt+'</div>';
+      }
+      // v33: info de aprobacion si aplica
+      if(c.aprobada && !c.cancelada){
+        var fApr = c.fechaAprobacion || '';
+        html+='<div class="cc-aprob-info" onclick="event.stopPropagation();"><b>✅ Fase Aprobada</b>'+(fApr?' · '+fApr:'')+'</div>';
+      }
       html+='<div class="cc-balance '+(pnl>=0?'ppos':'pneg')+'">'+'$'+saldoActual.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})+'</div>';
       html+='<div class="cc-pct '+(pnl>=0?'ppos':'pneg')+'">'+(pnl>=0?'+':'')+pnl.toFixed(2)+' ('+(cap>0?(pnl/cap*100).toFixed(2):0)+'%)</div>';
 
@@ -6600,7 +6777,23 @@ function renderTipo(tipo){
         html+='<div class="cc-stat"><div class="cc-stat-lbl">Winrate</div><div class="cc-stat-val">'+wr+'%</div></div>';
         html+='</div>';
       }
-      html+='<button onclick="elimCuenta('+gi+',event)" style="background:var(--rdim);border:1px solid var(--red);border-radius:6px;padding:2px 9px;color:var(--red);font-size:9px;font-weight:600;cursor:pointer;width:100%;margin-top:4px;">Eliminar</button>';
+      // v32: botones cancelar / reactivar / eliminar
+      // v33: agregar "Aprobada/Desmarcar" para fase1 y fase2
+      html+='<div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap;">';
+      if(tipo==='fase1' || tipo==='fase2'){
+        if(c.aprobada){
+          html+='<button onclick="desmarcarAprobada('+gi+',event)" style="flex:1;min-width:0;background:rgba(212,168,67,.12);border:1px solid var(--gold);border-radius:6px;padding:2px 4px;color:var(--gold);font-size:9px;font-weight:600;cursor:pointer;">Desmarcar</button>';
+        } else {
+          html+='<button onclick="marcarAprobada('+gi+',event)" style="flex:1;min-width:0;background:rgba(34,197,94,.12);border:1px solid var(--green);border-radius:6px;padding:2px 4px;color:var(--green);font-size:9px;font-weight:600;cursor:pointer;">Aprobada</button>';
+        }
+      }
+      if(c.cancelada){
+        html+='<button onclick="reactivarCuenta('+gi+',event)" style="flex:1;min-width:0;background:rgba(34,197,94,.12);border:1px solid var(--green);border-radius:6px;padding:2px 4px;color:var(--green);font-size:9px;font-weight:600;cursor:pointer;">Reactivar</button>';
+      } else {
+        html+='<button onclick="cancelarCuenta('+gi+',event)" style="flex:1;min-width:0;background:rgba(255,71,87,.08);border:1px solid rgba(255,71,87,.4);border-radius:6px;padding:2px 4px;color:var(--red);font-size:9px;font-weight:600;cursor:pointer;">Cancelar</button>';
+      }
+      html+='<button onclick="elimCuenta('+gi+',event)" style="flex:1;min-width:0;background:var(--rdim);border:1px solid var(--red);border-radius:6px;padding:2px 4px;color:var(--red);font-size:9px;font-weight:600;cursor:pointer;">Eliminar</button>';
+      html+='</div>';
       html+='</div>';
     } else {
       html+='<div class="cc-card '+tipo+' vacia" onclick="nuevaCuenta('+gi+')">';
@@ -10650,7 +10843,7 @@ function botImportarHistorico() {
 </script>
 
 <!-- v05: etiqueta de version siempre visible en esquina inferior derecha -->
-<div class="tb-version-tag" id="tb-version-tag">v30</div>
+<div class="tb-version-tag" id="tb-version-tag">v34</div>
 
 </body>
 </html>
